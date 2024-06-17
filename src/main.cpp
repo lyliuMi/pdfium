@@ -1,21 +1,45 @@
 #include <iostream>
 #include <string>
 #include <cstdlib>
+#include <cstdio>
 #include <unordered_set>
 #include "fpdfview.h"
 #include "fpdf_doc.h"
 #include "fpdf_text.h"
 #include "fpdf_edit.h"
+#include "fpdf_save.h"
 
 std::unordered_set<FPDF_PAGEOBJECT> used_resource;
+
+int writeBlock(FPDF_FILEWRITE* filewrite, const void* buffer, unsigned long size)
+{
+	// 打开文件
+	FILE* Ofile = fopen("output.pdf", "ab");
+	if (!Ofile) {
+        // 文件打开失败
+        return -1;
+    }else{
+        printf("open file successful\n");
+    }
+
+	// 将缓冲区中的数据写入文件
+    size_t bytesWrite = fwrite(buffer, 1, size, Ofile);
+    if (bytesWrite != size) {
+        // 写入失败
+        fclose(Ofile); // 关闭文件
+        return -1;
+    }
+	fclose(Ofile);
+	return 1;
+}
 
 void RemovedunusedResource(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
 {
 	// 删除当前pdf未使用的元素(对象)
-	if( FALSE == (FPDFPage_RemoveObject(page, obj)))
+	if( false == (FPDFPage_RemoveObject(page, obj)))
 	{
 		std::cerr << "remove fail" << std::endl;
-		exit(0);
+		//exit(0);
 	}
 	else
 	{
@@ -39,12 +63,14 @@ int main(int argc, char* argv[])
     std::cout << "numbers of page = " << page_count << std::endl;
     for(int i = 0; i < page_count; i++)
     {
+    	std::cout << "current page = " << i << std::endl;
         // 加载当前页
         FPDF_PAGE page = FPDF_LoadPage(pdf_doc, i); 
         // 获取当前页的对象数
         int object_count = FPDFPage_CountObjects(page);
 		for(int j = 0; j < object_count; j++)
 		{
+    		std::cout << "current obj = " << j << std::endl;
 			// 得到当前页的当前对象
 			FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, j);
 			// 将obj放入集合中
@@ -53,6 +79,7 @@ int main(int argc, char* argv[])
 			{
 				// 插入失败 说明对象重复 需删除
 				RemovedunusedResource(page, obj);
+				continue;
 			}
 			if(FPDF_PAGEOBJ_UNKNOWN == FPDFPageObj_GetType(obj))
 			{
@@ -79,8 +106,15 @@ int main(int argc, char* argv[])
 				
 			}
 		}
+		FPDF_ClosePage(page);
     }
 
+	FPDF_FILEWRITE filewrite;
+	filewrite.version = 1;
+	filewrite.WriteBlock = &writeBlock;
+	FPDF_SaveAsCopy(pdf_doc, &filewrite, FPDF_NO_INCREMENTAL);
+
+	FPDF_CloseDocument(pdf_doc);
     FPDF_DestroyLibrary();
     return 0;
 }

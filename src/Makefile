@@ -6,4 +6,4 @@ main: main.o
 main.o: main.cpp
 	g++ -c main.cpp -I ${Include}
 clean:
-	rm main main.o
+	rm main main.o output.pdf
