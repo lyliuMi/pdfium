@@ -26,7 +26,7 @@ int writeBlock(FPDF_FILEWRITE* filewrite, const void* buffer, unsigned long size
     size_t bytesWrite = fwrite(buffer, 1, size, Ofile);
     if (bytesWrite != size) {
         // 写入失败
-        fclose(Ofile); // 关闭文件
+        fclose(Ofile); 
         return -1;
     }
 	fclose(Ofile);
@@ -45,6 +45,19 @@ void RemovedunusedResource(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
 	{
 		std::cout << "removed unused resource" << std::endl;
 	}				
+}
+
+bool DeleteReusableElement(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
+{
+	// 将obj放入集合中
+	std::pair<std::unordered_set<FPDF_PAGEOBJECT>::iterator, bool> value = used_resource.insert(obj);
+	if(!value.second)
+	{
+		// 插入失败 说明对象重复 需删除
+		RemovedunusedResource(page, obj);
+		return true;
+	}
+	return false;
 }
 
 int main(int argc, char* argv[])
@@ -73,14 +86,10 @@ int main(int argc, char* argv[])
     		std::cout << "current obj = " << j << std::endl;
 			// 得到当前页的当前对象
 			FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, j);
-			// 将obj放入集合中
-			std::pair<std::unordered_set<FPDF_PAGEOBJECT>::iterator, bool> value = used_resource.insert(obj);
-			if(!value.second)
-			{
-				// 插入失败 说明对象重复 需删除
-				RemovedunusedResource(page, obj);
+			// 利用unordered_set底层哈希表原理删除重复元素
+			if(DeleteReusableElement(page, obj))
 				continue;
-			}
+
 			if(FPDF_PAGEOBJ_UNKNOWN == FPDFPageObj_GetType(obj))
 			{
 				RemovedunusedResource(page, obj);
