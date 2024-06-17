@@ -8,6 +8,7 @@
 #include "fpdf_text.h"
 #include "fpdf_edit.h"
 #include "fpdf_save.h"
+#include "turbojpeg.h"
 
 std::unordered_set<FPDF_PAGEOBJECT> used_resource;
 
@@ -31,6 +32,80 @@ int writeBlock(FPDF_FILEWRITE* filewrite, const void* buffer, unsigned long size
     }
 	fclose(Ofile);
 	return 1;
+}
+
+static int CustomFileRead(void* param, unsigned long position, unsigned char* pBuf, unsigned long size) {
+    const char* file_path = static_cast<const char*>(param);
+    FILE *fd = fopen(file_path, "rb");
+    if(fd == NULL){
+        std::cout << "open error";
+        return 0;
+    }
+    if(fseek(fd, position, SEEK_SET) != 0){
+        std::cout << "seek error";
+        fclose(fd);
+        return 0;
+    }
+    size_t bytesRead = fread(pBuf, 1, size, fd);
+    if (bytesRead != size) {
+        std::cout << "read error";
+        fclose(fd);
+        return 0; 
+    }
+    //std::cout << "successful" << std::strlen((char*)pBuf);
+    fclose(fd);
+    return 1; 
+}
+
+void CompressJpgImage(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
+{
+	// 获取图像的 Bitmap
+    FPDF_BITMAP bitmap = FPDFImageObj_GetBitmap(obj);
+    if (!bitmap) {
+        std::cerr << "Failed to get bitmap from image object." << std::endl;
+        return;
+    }
+
+    // 获取图像的原始数据
+    int width = FPDFBitmap_GetWidth(bitmap);
+    int height = FPDFBitmap_GetHeight(bitmap);
+    int stride = FPDFBitmap_GetStride(bitmap);
+    void* buffer = FPDFBitmap_GetBuffer(bitmap);
+	// 初始化 Turbo-JPEG
+    tjhandle tjInstance = tjInitCompress();
+    if (!tjInstance) {
+        std::cerr << "Failed to initialize Turbo-JPEG." << std::endl;
+        return;
+    }
+	unsigned char* compressedImage = nullptr;
+    unsigned long compressedSize = 0;
+    int quality = 75; // 压缩质量
+
+    // 使用 Turbo-JPEG 进行压缩
+    if (tjCompress2(tjInstance, (unsigned char*)buffer, width, stride, height, TJPF_BGRA, &compressedImage, &compressedSize, TJSAMP_420, quality, TJFLAG_FASTDCT) < 0) {
+        std::cerr << "Failed to compress image with Turbo-JPEG: " << tjGetErrorStr() << std::endl;
+        tjDestroy(tjInstance);
+        return;
+    }
+	// 更新图片
+	FPDF_FILEACCESS fileAccess;
+	char filename[] = "saved_file";
+
+	FILE *fd = fopen(filename,"wb");
+    if (NULL == fd) {
+        return;
+    }
+    fwrite(compressedImage,1,compressedSize,fd);
+    fclose(fd);
+	// 
+	fileAccess.m_FileLen=compressedSize;
+    fileAccess.m_Param=filename;
+    fileAccess.m_GetBlock=&CustomFileRead;
+	FPDFImageObj_LoadJpegFileInline(&page,0,obj,&fileAccess);
+	FPDFBitmap_Destroy(bitmap);
+	//
+	tjDestroy(tjInstance);
+    tjFree(compressedImage);
 }
 
 void RemovedunusedResource(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
@@ -104,7 +179,8 @@ int main(int argc, char* argv[])
 			}
 			else if(FPDF_PAGEOBJ_IMAGE == FPDFPageObj_GetType(obj))
 			{
-				
+				CompressJpgImage(page, obj);
+            	
 			}
 			else if(FPDF_PAGEOBJ_SHADING == FPDFPageObj_GetType(obj))
 			{
