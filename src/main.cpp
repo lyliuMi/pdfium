@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <unordered_set>
 #include "fpdfview.h"
 #include "fpdf_doc.h"
@@ -71,6 +72,12 @@ void CompressJpgImage(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
     int height = FPDFBitmap_GetHeight(bitmap);
     int stride = FPDFBitmap_GetStride(bitmap);
     void* buffer = FPDFBitmap_GetBuffer(bitmap);
+    unsigned long bufferlen = strlen((char*)buffer);
+    std::cout << "before compress buffersize:" << std::endl;
+    if(bufferlen == 0)
+    {
+        FPDFPage_RemoveObject(page,obj);
+    }
 	// 初始化 Turbo-JPEG
     tjhandle tjInstance = tjInitCompress();
     if (!tjInstance) {
@@ -79,10 +86,10 @@ void CompressJpgImage(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
     }
 	unsigned char* compressedImage = nullptr;
     unsigned long compressedSize = 0;
-    int quality = 75; // 压缩质量
+    int quality = 50; // 压缩质量
 
     // 使用 Turbo-JPEG 进行压缩
-    if (tjCompress2(tjInstance, (unsigned char*)buffer, width, stride, height, TJPF_BGRA, &compressedImage, &compressedSize, TJSAMP_420, quality, TJFLAG_FASTDCT) < 0) {
+    if (tjCompress2(tjInstance, (unsigned char*)buffer, width, stride, height, TJPF_BGR, &compressedImage, &compressedSize, TJSAMP_422, quality, 0) < 0) {
         std::cerr << "Failed to compress image with Turbo-JPEG: " << tjGetErrorStr() << std::endl;
         tjDestroy(tjInstance);
         return;
@@ -101,11 +108,13 @@ void CompressJpgImage(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
 	fileAccess.m_FileLen=compressedSize;
     fileAccess.m_Param=filename;
     fileAccess.m_GetBlock=&CustomFileRead;
+    
 	FPDFImageObj_LoadJpegFileInline(&page,0,obj,&fileAccess);
-	FPDFBitmap_Destroy(bitmap);
 	//
 	tjDestroy(tjInstance);
     tjFree(compressedImage);
+
+	FPDFBitmap_Destroy(bitmap);
 }
 
 void RemovedunusedResource(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
@@ -113,12 +122,12 @@ void RemovedunusedResource(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
 	// 删除当前pdf未使用的元素(对象)
 	if( false == (FPDFPage_RemoveObject(page, obj)))
 	{
-		std::cerr << "remove fail" << std::endl;
+		//std::cerr << "remove fail" << std::endl;
 		//exit(0);
 	}
 	else
 	{
-		std::cout << "removed unused resource" << std::endl;
+		//std::cout << "removed unused resource" << std::endl;
 	}				
 }
 
@@ -133,6 +142,16 @@ bool DeleteReusableElement(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
 		return true;
 	}
 	return false;
+}
+
+void RemoveunuseCharacter(FPDF_PAGE page, FPDF_PAGEOBJECT obj)
+{
+    FPDF_TEXTPAGE textPage=FPDFText_LoadPage(page);
+    FPDF_WCHAR content_buffer[256];
+    unsigned long len=FPDFTextObj_GetText(obj,textPage,content_buffer,100);
+    if(FPDFTextObj_GetTextRenderMode(obj)==FPDF_TEXTRENDERMODE_INVISIBLE ||len==2){
+        FPDFPage_RemoveObject(page,obj);
+    }
 }
 
 int main(int argc, char* argv[])
@@ -154,16 +173,24 @@ int main(int argc, char* argv[])
     	std::cout << "current page = " << i << std::endl;
         // 加载当前页
         FPDF_PAGE page = FPDF_LoadPage(pdf_doc, i); 
+        if (!page) {
+            continue;
+        }
         // 获取当前页的对象数
         int object_count = FPDFPage_CountObjects(page);
 		for(int j = 0; j < object_count; j++)
 		{
-    		std::cout << "current obj = " << j << std::endl;
 			// 得到当前页的当前对象
 			FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, j);
+            if (!obj) {
+                continue;
+            }
+            //std::cout << FPDFPageObj_GetObjNum(obj) << std::endl;
+            unsigned int R,G,B,A;
+            FPDFPageObj_GetFillColor(obj,&R,&G,&B,&A);
 			// 利用unordered_set底层哈希表原理删除重复元素
-			if(DeleteReusableElement(page, obj))
-				continue;
+			//if(DeleteReusableElement(page, obj))
+				//continue;
 
 			if(FPDF_PAGEOBJ_UNKNOWN == FPDFPageObj_GetType(obj))
 			{
@@ -171,7 +198,7 @@ int main(int argc, char* argv[])
 			}
 			else if(FPDF_PAGEOBJ_TEXT == FPDFPageObj_GetType(obj))
 			{
-
+                RemoveunuseCharacter(page, obj);
 			}
 			else if(FPDF_PAGEOBJ_PATH == FPDFPageObj_GetType(obj))
 			{
@@ -179,8 +206,8 @@ int main(int argc, char* argv[])
 			}
 			else if(FPDF_PAGEOBJ_IMAGE == FPDFPageObj_GetType(obj))
 			{
+				std::cout << "begin compress!" << std::endl;
 				CompressJpgImage(page, obj);
-            	
 			}
 			else if(FPDF_PAGEOBJ_SHADING == FPDFPageObj_GetType(obj))
 			{
@@ -190,7 +217,9 @@ int main(int argc, char* argv[])
 			{
 				
 			}
+            FPDFPageObj_SetFillColor(obj,R,G,B,A);
 		}
+        FPDFPage_GenerateContent(page);
 		FPDF_ClosePage(page);
     }
 
